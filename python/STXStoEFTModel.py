@@ -38,13 +38,48 @@ def getSTXSProdDecMode(bin,process,options):
     print "Warning: decay string %s does not contain any known energy, assuming %s" % (decaySource, foundEnergy)
   return (processSource, foundDecay, foundEnergy)
 
+def getSTXSProdDecMode_fix(bin,process,options):
+  processSource = process
+  decaySource = options.fileName+":"+bin # by default, decay comes from datacard name or bin label
+  if "_hgg" in process:
+    processSource = re.sub('_hgg','',process)
+    foundDecay = 'hgg'
+    foundEnergy = '13TeV'
+  else:
+    if "_" in process:
+      #decay at end of process name after final _: join all previous parts to give processSource 
+      (processSource, decaySource) = "_".join(process.split("_")[0:-1]),process.split("_")[-1]
+    foundDecay = None
+    for D in ALL_HIGGS_DECAYS:
+      if D in decaySource:
+        if foundDecay: raise RuntimeError, "Validation Error: decay string %s contains multiple known decay names" % decaySource
+        foundDecay = D
+    if not foundDecay: raise RuntimeError, "Validation Error: decay string %s does not contain any known decay name" % decaySource
+
+    foundEnergy = None
+    for D in [ '7TeV', '8TeV', '13TeV', '14TeV' ]:
+      if D in decaySource:
+        if foundEnergy: raise RuntimeError, "Validation Error: decay string %s contains multiple known energies" % decaySource
+        foundEnergy = D
+    if not foundEnergy:
+      for D in [ '7TeV', '8TeV', '13TeV', '14TeV' ]:
+        if D in options.fileName+":"+bin:
+          if foundEnergy: raise RuntimeError, "Validation Error: decay string %s contains multiple known energies" % decaySource
+          foundEnergy = D
+    if not foundEnergy:
+      foundEnergy = '13TeV' ## if using 81x, chances are its 13 TeV
+      print "Warning: decay string %s does not contain any known energy, assuming %s" % (decaySource, foundEnergy)
+
+  return (processSource, foundDecay, foundEnergy)
+
+
 #################################################################################################################
 # STXS to EFT abstract base class: inherited classes for different stages
 class STXStoEFTBaseModel(SMLikeHiggsModel):
 
   # initialisation: include options for STXS bin and BR uncertainties (FOR NOW FALSE)
   # TO DO: add function for STXS uncertainties, like partial width unc in SMHiggsBuilder
-  def __init__(self,scalePOIs=True,STXSU=False,BRU=False,fixTHandBBH=True,freezeNonHELParameters=False):
+  def __init__(self,scalePOIs=True,STXSU=False,BRU=False,fixTHandBBH=True,freezeNonHELParameters=False,fixReading=False):
     SMLikeHiggsModel.__init__(self)
     self.PROCESSES = []
     self.DECAYS = []
@@ -54,6 +89,7 @@ class STXStoEFTBaseModel(SMLikeHiggsModel):
     self.doBRU = BRU
     self.fixTHandBBH = fixTHandBBH
     self.freezeNonHELParameters = freezeNonHELParameters 
+    self.fixReading = fixReading
 
   def setPhysicsOptionsBase(self,physOptions):
     for po in physOptions:
@@ -70,11 +106,14 @@ class STXStoEFTBaseModel(SMLikeHiggsModel):
         self.doSTXSU = (po.replace("STXSU=","") in ["yes","1","Yes","True","true"])
       if po.startswith("freezeNonHEL="):
         self.freezeNonHELParameters = (po.replace("freezeNonHEL=","") in ["yes","1","Yes","True","true"])
+      if po.startswith("fixReading="):
+        self.fixReading = (po.replace("fixReading=","") in ["yes","1","Yes","True","true"])
     print "[STXStoEFT] Theory uncertainties in partial widths: %s"%self.doBRU
     print "[STXStoEFT] Theory uncertainties in STXS bins: %s"%self.doSTXSU
     if( self.doSTXSU ): print "   [WARNING]: theory uncertainties in STXS bins are currently incorrect. Need to update: HiggsAnalysis/CombinedLimit/data/lhc-hxswg/eft/stageX/BinUncertainties.txt"
     if( self.freezeNonHELParameters ): print "[STXStoEFT] Freezing all but [cG,cA,cu,cHW,cWWMinuscB] to 0"
     else: print "[STXStoEFT] Allowing all HEL parameters to float"
+    print "[STXStoEFT] Reading in processes fix"
 
   def doMH(self):
     if self.floatMass:
@@ -94,7 +133,8 @@ class STXStoEFTBaseModel(SMLikeHiggsModel):
   def getYieldScale(self,bin,process):
     "Split in production and decay, and call getHiggsSignalYieldScale; return 1 for backgrounds "
     if not self.DC.isSignal[process]: return 1
-    (processSource, foundDecay, foundEnergy) = getSTXSProdDecMode(bin,process,self.options)
+    if( self.fixReading ): (processSource, foundDecay, foundEnergy) = getSTXSProdDecMode_fix(bin,process,self.options)
+    else: (processSource, foundDecay, foundEnergy) = getSTXSProdDecMode(bin,process,self.options)
     return self.getHiggsSignalYieldScale(processSource, foundDecay, foundEnergy)
 
   #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
