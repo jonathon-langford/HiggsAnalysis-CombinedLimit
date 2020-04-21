@@ -280,16 +280,12 @@ class ShapeBuilder(ModelBuilder):
                     stderr.write("Importing combined pdf %s\n" % simPdf.GetName()); stderr.flush()
 
 		# take care of any variables which were renamed (eg for "param")
-		renameParamString = [] 
-		paramString       = []
-      		for n in self.DC.systematicsParamMap.keys():
-		  paramString.append(self.DC.systematicsParamMap[n])
-		  renameParamString.append(n)
+		paramString,renameParamString,toFreeze = self.getRenamingParameters()
 		if len(renameParamString): 
-		  renameParamString=",".join(renameParamString)
-		  paramString=",".join(paramString)
                   self.out._import(simPdf, ROOT.RooFit.RecycleConflictNodes(),ROOT.RooFit.RenameVariable(paramString,renameParamString))
                 else: self.out._import(simPdf, ROOT.RooFit.RecycleConflictNodes())
+		for pfreeze in toFreeze:
+		  if self.out.var(pfreeze) : self.out.var(pfreeze).setConstant(True)
                 if self.options.noBOnly: break
         else:
             self.out._import(self.getObj("pdf_bin%s"       % self.DC.bins[0]).clone("model_s"), ROOT.RooFit.Silence())
@@ -315,7 +311,7 @@ class ShapeBuilder(ModelBuilder):
         for i in xrange(1, branchNodes.getSize()):
             arg = branchNodes.at(i)
             if arg.GetName() in dupNames and arg not in dupObjs:
-                print 'Object %s is duplicated' % arg.GetName()
+                if self.options.verbose > 1 : stderr.write('Object %s is duplicated, will rename to %s_%s'%(arg.GetName(),arg.GetName(),postFix))
                 arg.SetName(arg.GetName() + '_%s' % postFix)
             # if arg.GetName() in dupNames and arg in dupObjs:
                 # print 'Objected %s is repeated' % arg.GetName()
@@ -519,8 +515,7 @@ class ShapeBuilder(ModelBuilder):
                     if allowNoSyst: return None
                     raise RuntimeError, "Object %s in workspace %s in file %s does not exist or it's neither a data nor a pdf" % (oname, wname, finalNames[0])
                 # Fix the fact that more than one entry can refer to the same object
-                ret = ret.Clone()
-                ret.SetName("shape%s_%s_%s%s" % (postFix,process,channel, "_"+syst if syst else ""))
+                ret = ret.Clone("shape%s_%s_%s%s" % (postFix,process,channel, "_"+syst if syst else ""))
                 if self.options.optimizeMHDependency and ret.InheritsFrom("RooAbsReal"):
                     ret = self.optimizeMHDependency(ret,self.wsp)
                 _cache[(channel,process,syst)] = ret
@@ -537,7 +532,11 @@ class ShapeBuilder(ModelBuilder):
                         norm = self.optimizeMHDependency(norm,self.wsp)
                     norm.SetName("shape%s_%s_%s%s_norm" % (postFix,process,channel, "_"))
 		    self.norm_rename_map[normname]=norm.GetName()
-                    self.out._import(norm, ROOT.RooFit.RecycleConflictNodes()) 
+
+		    # take care of any variables which were renamed (eg for "param")
+		    paramString,renameParamString,toFreeze = self.getRenamingParameters()
+		    if len(renameParamString):   self.out._import(norm, ROOT.RooFit.RecycleConflictNodes(),ROOT.RooFit.RenameVariable(paramString,renameParamString))
+                    else : self.out._import(norm, ROOT.RooFit.RecycleConflictNodes()) 
                 if self.options.verbose > 2: print "import (%s,%s) -> %s\n" % (finalNames[0],objname,ret.GetName())
                 return ret;
             elif self.wsp.ClassName() == "TTree":
